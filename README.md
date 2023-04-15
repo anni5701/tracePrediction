@@ -1,7 +1,7 @@
 # tracePrediction
 
 requirements:
-Python 3.10.10
+Python 3.10.10 /n
 ahrs 0.3.1
 keras 2.10.0
 keras-preprocessing 1.1.2
