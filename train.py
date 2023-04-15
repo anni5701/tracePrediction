@@ -9,19 +9,16 @@ import statistics
 
 class PredictionModel:
 
-    BATCH_SIZE = 10 # a set of N samples. The samples in a batch are processed` independently, in parallel. If training, a batch results in only one update to the model.
+    BATCH_SIZE = 100 
     INPUT_DIM = 6
     OUTPUT_DIM = 1 
     RNN_HIDDEN_DIM = 32
-    DROPOUT_RATIO = 0.1 # proportion of neurones not used for training
 
-    #  an arbitrary cutoff, generally defined as "one pass over the entire dataset", used to separate training into distinct phases, which is useful for logging and periodic evaluation.
-    # would a list with indices also work?
-    EPCOHS = 30
+    EPCOHS = 50
     TIME_PERIODS = 10
 
     def __init__(self, dataframe):
-        x_train, y_train, x_test, y_test = self.prepare_data(dataframe)    #, X_test, y_test 
+        x_train, y_train, x_test, y_test = self.prepare_data(dataframe)   
         print("The trainings data is of shape {} and the test data is of shape {}". format(x_train.shape, x_test.shape))
         neg_train, pos_train = np.bincount(y_train[:,0].astype(int))
         neg_test, pos_test = np.bincount(y_test[:,0].astype(int))
@@ -34,12 +31,12 @@ class PredictionModel:
 
         print ('Fitting model...')
         
-        history = model.fit(x_train, y_train ,batch_size= self.BATCH_SIZE , epochs=self.EPCOHS,  validation_split = 0.2, verbose = "2", show_accuracy=True) #, shuffle= "batch"
+        history = model.fit(x_train, y_train ,batch_size= self.BATCH_SIZE , epochs=self.EPCOHS,  validation_split = 0.2, verbose = "2") #, shuffle= "batch"
 
         print ('Use  mmodel on test data...')
         predictions = model.predict(x_test)
         predictions = np.mean(predictions, axis=1)
-        predictions = np.where(predictions <= 0.5, 0, 1) #predictions.apply(lambda x : 0 if x <= 0.5 else 1)
+        predictions = np.where(predictions <= 0.5, 0, 1) 
         self.create_plots(history, predictions, y_test)
 
         
@@ -115,7 +112,7 @@ class PredictionModel:
 
 
 
-    def create_lstm(self,input_shape, input_dim = INPUT_DIM, dropout = DROPOUT_RATIO, output_bias= None):
+    def create_lstm(self,input_shape, input_dim = INPUT_DIM, output_bias= None):
         print ('Create the LSTM model...')
 
         if output_bias is not None:
@@ -123,10 +120,9 @@ class PredictionModel:
 
         model = Sequential()
         model.add(tf.keras.layers.Reshape((self.TIME_PERIODS, input_dim), input_shape=(input_shape,)))
-        model.add(tf.keras.layers.LSTM(units = 10, input_shape = (input_shape,))) # change shape to 100, return_sequences = True,
+        model.add(tf.keras.layers.LSTM(units = 10, input_shape = (input_shape,))) # return_sequences = True,
         #model.add(tf.keras.layers.LSTM(units = 10, return_sequences = True))
         model.add(tf.keras.layers.Dense(units = 1, activation='sigmoid', bias_initializer=output_bias)) 
-       # model.add(tf.keras.layers.Flatten())
         model.compile('adam', 'binary_crossentropy', 'accuracy') #metrics=[tf.keras.metrics.BinaryAccuracy()]
         print(model.summary())
         return model
@@ -163,11 +159,5 @@ class PredictionModel:
         plt.title('Confusion Matrix', fontsize=18)
         plt.show()
 
-
-        #plot_model(model, to_file='model.png')
-
-        # validate model on unseen data
-        #score, acc = model.evaluate(X_test, y_test, batch_size=BATCH_SIZE)
-        #print('Validation score:', score)
         print('Validation accuracy:', history.history['accuracy'])
 
