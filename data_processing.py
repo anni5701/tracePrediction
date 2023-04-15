@@ -103,16 +103,6 @@ class Dataset:
         df['arduino_timestamp'] = df['arduino_timestamp'].apply(lambda x: (x - min(df['arduino_timestamp'])) /1000)
         return df
 
-    # split data into segments (individual sentences)
-    def split_into_segments(self, df: pd.DataFrame):
-        data_segments = {}
-        split_indices, = np.where(df["reset"] == 1)
-        if split_indices == []:
-            return df # no segments reported
-        for i in range(len(split_indices)-1):
-            data_segments["segment_"+str(i)] = df.iloc[split_indices[i]:split_indices[i+1]]
-        return data_segments
-
 
     def quaternions(self, df: pd.DataFrame): # input dataframe/single segment
         print("calculate the quaternion representations...")
@@ -202,4 +192,14 @@ class Dataset:
 
         return vel_x, vel_y,vel_z,pos_x,pos_y,pos_z
 
+
+# split data into segments (individual sentences)
+def split_into_segments(df: pd.DataFrame):
+    data_segments = {}
+    split_indices, = np.where(df["reset"] == 1)
+    if split_indices == []:
+        return df # no segments reported
+    for i in range(len(split_indices)-1):
+        data_segments["segment_"+str(i)] = df.iloc[split_indices[i]:split_indices[i+1]]
+    return data_segments
 

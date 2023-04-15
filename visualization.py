@@ -1,8 +1,47 @@
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import accuracy_score
+from data_processing import split_into_segments
 
 
-def plot_segments(df):
+def plot_accuracy(history):
+    plt.plot(history.history['accuracy'])
+    plt.plot(history.history['val_accuracy'])
+    plt.title('model accuracy')
+    plt.ylabel('accuracy')
+    plt.xlabel('epoch')
+    plt.legend(['train', 'validation'], loc='upper left')
+    plt.savefig('./data/accuracy.png')
+    plt.show()
+
+def plot_loss(history):
+    plt.plot(history.history['loss'])
+    plt.plot(history.history['val_loss'])
+    plt.title('model loss')
+    plt.ylabel('loss')
+    plt.xlabel('epoch')
+    plt.legend(['train', 'validation'], loc='upper left')
+    plt.savefig('./data/loss.png')
+    plt.show()
+
+
+def plot_confusion_matrix(predictions, y_test):
+    cm = confusion_matrix(y_test, predictions)
+    fig, ax = plt.subplots(figsize=(7.5, 7.5))
+    ax.matshow(cm, cmap=plt.cm.Blues, alpha=0.3)
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            ax.text(x=j, y=i,s=cm[i, j], va='center', ha='center', size='xx-large')
+
+    plt.xlabel('Predictions', fontsize=18)
+    plt.ylabel('Actuals', fontsize=18)
+    plt.title('Confusion Matrix', fontsize=18)
+    plt.savefig('./data/confusion-matrix.png')
+    plt.show()
+
+
+def plot_data_set(df):
     fig, axes = plt.subplots(8, figsize=(8, 16))
     
     is_touch = df["touch"] == 1
@@ -38,7 +77,47 @@ def plot_segments(df):
 
     plt.show()
 
-def plot_3d(self, df):
+
+def plot_segment(df, index_of_segment:int= 0):
+
+    data_segments = split_into_segments(df) # dictonary of segments
+    segment = data_segments["segment_"+str(index_of_segment)]
+    fig, axes = plt.subplots(8, figsize=(8, 16))
+    
+    is_touch = segment["touch"] == 1
+    axes[0].plot(segment["x"].where(is_touch), segment["y"].where(is_touch), c="k")
+    axes[0].plot(segment["x"].where(~is_touch), segment["y"].where(~is_touch), c="grey", alpha= 0.4)
+    axes[0].set_ylabel('tablet data')
+
+    axes[1].plot(segment['arduino_timestamp'], segment['ax'], c="k", label= "sensor frame")
+    axes[1].plot(segment['arduino_timestamp'], segment['nav_ax'], c="r", label= "nav frame")
+    axes[1].set_ylabel('ax  [m/s^2]')
+    axes[1].legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    axes[2].plot(segment['arduino_timestamp'], segment['ay'], c="k", label= "sensor frame")
+    axes[2].plot(segment['arduino_timestamp'], segment['nav_ay'], c="r", label= "nav frame")
+    axes[2].set_ylabel('ay  [m/s^2]')
+    axes[2].legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    axes[3].plot(segment['arduino_timestamp'], segment['az'], c="k", label= "sensor frame")
+    axes[3].plot(segment['arduino_timestamp'], segment['nav_az'], c="r", label= "nav frame")
+    axes[3].set_ylabel('az  [m/s^2]')
+    axes[3].legend(loc='center left', bbox_to_anchor=(1, 0.5))
+
+    axes[4].plot(segment['arduino_timestamp'], segment['vel_x'], c="k")
+    axes[4].set_ylabel('vel x')
+    axes[5].plot(segment['arduino_timestamp'], segment['vel_y'], c="k")
+    axes[5].set_ylabel('vel y')  
+    axes[6].plot(segment['arduino_timestamp'], segment['vel_z'], c="k")
+    axes[6].set_ylabel('vel z')
+
+    axes[7].plot(segment['pos_x'], segment['pos_y'], c="k")
+    axes[7].set_ylabel('integrated positions')
+
+    fig.align_ylabels()
+    fig.tight_layout()
+
+    plt.show()
+
+def plot_3d(df):
     plt.style.use('seaborn')
 
     fig3,ax = plt.subplots()
@@ -51,7 +130,7 @@ def plot_3d(self, df):
     ax.set_zlabel('Z position')
     plt.show()
 
-def plot_3d_tab(self, df):
+def plot_3d_tab(df):
     plt.style.use('seaborn')
 
     fig3,ax = plt.subplots()
@@ -65,7 +144,7 @@ def plot_3d_tab(self, df):
 
 
 
-def interactive_3d_plot_positions(self, df):
+def interactive_3d_plot_positions(df):
     fig = go.Figure(data=[go.Scatter3d(mode='markers',x= df['pos_x'], y= df['pos_y'], z =df['pos_z'], marker=dict(size=1))])
     fig.update_layout(
                 title= {'text': "Integrated positions", 'y':0.95, 'x':0.5, 'xanchor': 'center', 'yanchor': 'top'},
@@ -77,7 +156,7 @@ def interactive_3d_plot_positions(self, df):
                     margin=dict(r=20, b=10, l=10, t=10))
     fig.show()
 
-def interactive_3d_plot_tab(self, df):
+def interactive_3d_plot_tab(df):
     fig = go.Figure()
     fig.add_trace(go.Scatter3d(mode='markers',x= df.x, y= df.y, z = df.z, marker=dict(size=1)))
     fig.add_trace(go.Scatter3d(mode='markers',x= [min(df.x)], y= [max(df.y)], z = [0], marker=dict(size=10), name="upper left corner tablet"))
@@ -91,7 +170,7 @@ def interactive_3d_plot_tab(self, df):
                     margin=dict(r=20, b=10, l=10, t=10))
     fig.show()
 
-def interactive_plot(self, df):
+def interactive_plot(df):
     fig = go.Figure()
     fig.add_trace(go.Scatter3d(mode='markers',x= df['pos_x'], y= df['pos_y'], z = df['pos_z'], marker=dict(size=1), name="calculated positions"))
     fig.add_trace(go.Scatter3d(mode='markers',x= df.x, y= df.y, z = df.z, marker=dict(size=1), name="tablet data"))
