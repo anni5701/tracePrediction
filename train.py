@@ -3,35 +3,48 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from keras.models import Sequential
-from keras.optimizers import Adam
-import os
-import scipy
-
+from sklearn.metrics import confusion_matrix
+import statistics
 
 
 class PredictionModel:
 
-    BATCH_SIZE = 100 # a set of N samples. The samples in a batch are processed` independently, in parallel. If training, a batch results in only one update to the model.
+    BATCH_SIZE = 10 # a set of N samples. The samples in a batch are processed` independently, in parallel. If training, a batch results in only one update to the model.
     INPUT_DIM = 6
     OUTPUT_DIM = 1 
     RNN_HIDDEN_DIM = 32
     DROPOUT_RATIO = 0.1 # proportion of neurones not used for training
 
-
-
     #  an arbitrary cutoff, generally defined as "one pass over the entire dataset", used to separate training into distinct phases, which is useful for logging and periodic evaluation.
     # would a list with indices also work?
-    EPCOHS = 50
+    EPCOHS = 30
     TIME_PERIODS = 10
 
     def __init__(self, dataframe):
-        x_train, y_train= self.prepare_data(dataframe)    #, X_test, y_test 
-        model = self.create_lstm(input_shape=x_train.shape[1]) 
+        x_train, y_train, x_test, y_test = self.prepare_data(dataframe)    #, X_test, y_test 
+        print("The trainings data is of shape {} and the test data is of shape {}". format(x_train.shape, x_test.shape))
+        neg_train, pos_train = np.bincount(y_train[:,0].astype(int))
+        neg_test, pos_test = np.bincount(y_test[:,0].astype(int))
+        print('Train data:\n    Total: {}\n    Positive: {} ({:.2f}% of total)\n'.format(len(y_train), pos_train, 100 * pos_train / len(y_train)))
+        print('Test data:\n    Total: {}\n    Positive: {} ({:.2f}% of total)\n'.format(len(y_test), pos_test, 100 * pos_test / len(y_test)))
+
+        initial_bias = np.log([(pos_train + pos_test) / (neg_train + neg_test)])
+
+        model = self.create_lstm(input_shape=x_train.shape[1]) # , output_bias=initial_bias
 
         print ('Fitting model...')
         
-        history = model.fit(x_train, y_train,batch_size= self.BATCH_SIZE ,class_weight=None, epochs=self.EPCOHS,  validation_split = 0.2, verbose = "1")
-        self.create_plots(history)
+        history = model.fit(x_train, y_train ,batch_size= self.BATCH_SIZE , epochs=self.EPCOHS,  validation_split = 0.2, verbose = "2", show_accuracy=True) #, shuffle= "batch"
+
+        print ('Use  mmodel on test data...')
+        predictions = model.predict(x_test)
+        predictions = np.mean(predictions, axis=1)
+        predictions = np.where(predictions <= 0.5, 0, 1) #predictions.apply(lambda x : 0 if x <= 0.5 else 1)
+        self.create_plots(history, predictions, y_test)
+
+        
+        
+
 
         
 
@@ -47,12 +60,7 @@ class PredictionModel:
             nav_y = dataframe['nav_ay'].values[i: i + step]
             nav_z = dataframe['nav_az'].values[i: i + step]
             # Retrieve the most often used label in this segment
-            #label = scipy.stats.mode(df[label_name][i: i + step])[0][0]
-            label = np.average(dataframe[label_name][i: i + step])
-            if label <= 0.5:
-                label = 0
-            else:
-                label = 1
+            label = statistics.mode(dataframe[label_name][i: i + step])
             segments.append([xs, ys, zs, nav_x, nav_y, nav_z])
             labels.append(label)
 
@@ -81,40 +89,49 @@ class PredictionModel:
             train = df.iloc[:split]
             test =  df.iloc[split:]
 
-        print(train.shape, type(train))
-
         x_train, y_train = self.create_segments_and_labels(train, 10, 'touch_bin', 6) # is this always the same as input dim?
+        x_test, y_test = self.create_segments_and_labels(test, 10, 'touch_bin', 6) # is this always the same as input dim?
 
         num_time_periods, n_features = x_train.shape[1], x_train.shape[2]
-        print(x_train.shape)
 
-        input_shape = (num_time_periods*n_features)
+        input_shape = (num_time_periods*n_features) # num segments times num features
         x_train = x_train.reshape(x_train.shape[0], input_shape) # is shape[0] the number of samples?
         y_train = y_train.reshape(-1,1)
 
         x_train = x_train.astype('float32')
         y_train = y_train.astype('float32')
 
+        num_time_periods, n_features = x_test.shape[1], x_test.shape[2]
+        input_shape = (num_time_periods*n_features)
+        x_test = x_test.reshape(x_test.shape[0], input_shape) # is shape[0] the number of samples?
+        y_test = y_test.reshape(-1,1)
 
-        return x_train, y_train#, X_test, y_test
+        x_test = x_test.astype('float32')
+        y_test = y_test.astype('float32')
+
+
+        return x_train, y_train, x_test, y_test
 
 
 
 
-    def create_lstm(self,input_shape, input_dim = INPUT_DIM, dropout = DROPOUT_RATIO):
+    def create_lstm(self,input_shape, input_dim = INPUT_DIM, dropout = DROPOUT_RATIO, output_bias= None):
         print ('Create the LSTM model...')
+
+        if output_bias is not None:
+            output_bias = tf.keras.initializers.Constant(output_bias)
+
         model = Sequential()
         model.add(tf.keras.layers.Reshape((self.TIME_PERIODS, input_dim), input_shape=(input_shape,)))
-        model.add(tf.keras.layers.LSTM(units = 50, return_sequences = True, input_shape = (input_shape,))) # change shape to 100
-        model.add(tf.keras.layers.Dropout(0.2))
-        model.add(tf.keras.layers.LSTM(units = 50, return_sequences = True, dropout= dropout))
-        model.add(tf.keras.layers.LSTM(units = 50, return_sequences = True))
-        model.add(tf.keras.layers.Dropout(0.4))
-        model.add(tf.keras.layers.Dense(units = 1, activation='sigmoid'))
-        model.compile('adam', 'binary_crossentropy', metrics=['accuracy'])
+        model.add(tf.keras.layers.LSTM(units = 10, input_shape = (input_shape,))) # change shape to 100, return_sequences = True,
+        #model.add(tf.keras.layers.LSTM(units = 10, return_sequences = True))
+        model.add(tf.keras.layers.Dense(units = 1, activation='sigmoid', bias_initializer=output_bias)) 
+       # model.add(tf.keras.layers.Flatten())
+        model.compile('adam', 'binary_crossentropy', 'accuracy') #metrics=[tf.keras.metrics.BinaryAccuracy()]
+        print(model.summary())
         return model
 
-    def create_plots(self,history):
+    def create_plots(self,history, predictions, y_test):
         print ('Plot the results...')
         plt.plot(history.history['accuracy'])
         plt.plot(history.history['val_accuracy'])
@@ -133,6 +150,19 @@ class PredictionModel:
         plt.legend(['train', 'validation'], loc='upper left')
         plt.savefig('./data/loss.png')
         plt.show()
+
+        cm = confusion_matrix(y_test, predictions)
+        fig, ax = plt.subplots(figsize=(7.5, 7.5))
+        ax.matshow(cm, cmap=plt.cm.Blues, alpha=0.3)
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                ax.text(x=j, y=i,s=cm[i, j], va='center', ha='center', size='xx-large')
+ 
+        plt.xlabel('Predictions', fontsize=18)
+        plt.ylabel('Actuals', fontsize=18)
+        plt.title('Confusion Matrix', fontsize=18)
+        plt.show()
+
 
         #plot_model(model, to_file='model.png')
 
