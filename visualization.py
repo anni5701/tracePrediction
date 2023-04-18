@@ -185,3 +185,18 @@ def interactive_plot(df):
                     margin=dict(r=20, b=10, l=10, t=10))
     
     fig.show()
+
+
+def test_predcition_comparison(y_test, predictions):
+    x_true = y_test[:,0]
+    y_true = y_test[:,1]
+    x_pred = predictions[:,0]
+    y_pred = predictions[:,1]
+
+    print(x_pred[:5])
+    print(y_pred[:5])
+
+    #plt.plot(x_true,y_true, c='blue', label='true values')
+    plt.plot(x_pred, y_pred, c='red', label='predicted values')
+    plt.legend()
+    plt.show()
