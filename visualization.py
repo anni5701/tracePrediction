@@ -2,7 +2,7 @@ import plotly.graph_objects as go
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import accuracy_score
-from data_processing import split_into_segments
+from data_processing import get_ith_segment
 
 
 def plot_accuracy(history):
@@ -80,8 +80,7 @@ def plot_data_set(df):
 
 def plot_segment(df, index_of_segment:int= 0):
 
-    data_segments = split_into_segments(df) # dictonary of segments
-    segment = data_segments["segment_"+str(index_of_segment)]
+    segment = get_ith_segment(df, index_of_segment)
     fig, axes = plt.subplots(8, figsize=(8, 16))
     
     is_touch = segment["touch"] == 1
@@ -193,10 +192,21 @@ def test_predcition_comparison(y_test, predictions):
     x_pred = predictions[:,0]
     y_pred = predictions[:,1]
 
-    print(x_pred[:5])
-    print(y_pred[:5])
+    print("First predictions for x: ", x_pred[:5])
+    print("First predictions for y: ",y_pred[:5])
 
-    #plt.plot(x_true,y_true, c='blue', label='true values')
+    plt.plot(x_true,y_true, c='blue', label='true values')
     plt.plot(x_pred, y_pred, c='red', label='predicted values')
+    plt.legend()
+    plt.show()
+
+
+def test_predcition_comparison_x(y_test, predictions):
+    x_true = y_test[:,0]
+    x_pred = predictions[:,0]
+    t = range(0,len(x_true))
+
+    plt.plot(t, x_true, c='blue', label='true values')
+    plt.plot(t, x_pred, c='red', label='predicted values')
     plt.legend()
     plt.show()

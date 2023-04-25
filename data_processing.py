@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import ahrs
 from numpy.linalg import norm
+import scipy
 
 
 class Dataset:
@@ -62,6 +63,85 @@ class Dataset:
         integrated_data = np.stack((vel_x, vel_y, vel_z, pos_x, pos_y, pos_z), axis=1)
         df = pd.concat([df.reset_index(drop=True), pd.DataFrame(integrated_data, columns=['vel_x','vel_y','vel_z', 'pos_x', 'pos_y', 'pos_z'])], axis=1)
         return df
+    
+    #after merge
+    def merge_data_based_on_tab(self, tab, imu, smoothness, step):
+        t_left, t_right = tab["host_timestamp"].iloc[[0, -1]]
+        i_left, i_right = imu["host_timestamp"].iloc[[0, -1]]
+        left = max(t_left, i_left) #later start
+        right = min(t_right, i_right) #earlier ending
+
+        # use tab data set as base to merge on
+        df = tab[(tab["host_timestamp"] >= left) & (tab["host_timestamp"] <= right)].copy() 
+
+        is_entering_range = df["in_range"].diff() == 1
+        is_reset_in_range = (df["in_range"] == 1) & (df["reset"] == 1)
+        is_start_of_segment = is_entering_range | is_reset_in_range
+        
+        # Number segments
+        df["segment"] = is_start_of_segment.cumsum()
+        
+        # Ignore parts that are out-of-range
+        df = df[df["in_range"] == 1]
+
+        # collect all segments in this dictonary with key= segment(int), value= dataframe
+        dfs = dict()
+        segment = 0
+
+        for _, df in df.groupby("segment"):
+
+            data = pd.DataFrame()
+
+            mask = df["touch"] > 0.0
+            if not mask.any():
+                continue
+            start, end = df.index[mask][[0, -1]] # mask hat für die gesamte colum true/false werte und start/end sind erste letzte true werte
+            df = df.loc[start:end]
+
+            imu_start = imu.loc[(imu['host_timestamp']-df["host_timestamp"].loc[start]).abs().argsort()[:1]].index
+            imu_end = imu.loc[(imu['host_timestamp']-df["host_timestamp"].loc[end]).abs().argsort()[:1]].index
+
+            imu_df = imu.loc[imu_start, imu_end]
+
+            # Compute distance
+            x = df["x"].values
+            y = df["y"].values
+            dx = np.diff(x, prepend=x[0])
+            dy = np.diff(y, prepend=y[0])
+            d = np.sqrt(dx ** 2 + dy ** 2)
+            t = np.cumsum(d)
+            length = t[-1]
+
+            # Fit cubic splines
+            mask = d > 1e-5
+            if mask.sum() <= 3:
+                continue
+            tck, _ = scipy.interpolate.splprep([x[mask], y[mask]], u=t[mask], s=smoothness)
+
+            # Sample spline at regular (spatial) interval
+            data["t_r"] = np.arange(0, length, step)
+            x_r, y_r = scipy.interpolate.splev(data["t_r"], tck, der=0)
+
+            data["x_r"] = x_r
+            data["y_r"] = y_r
+
+            t_imu = imu_df["host_timestamp"] - np.min(imu_df["host_timestamp"])
+            imu_time_span = np.linspace(0, np.max(t_imu), len(data))
+
+            # interpolate imu data to the same time span but accoring to the imu time values
+            for column in ['ax', 'ay', 'az', 'gx', 'gy', 'gz']:
+                data[column] = np.interp(imu_time_span, t_imu, imu_df[column])
+
+            # Use small dtypes => WHY???
+            # x_r = x_r.astype(np.float32)
+            # y_r = y_r.astype(np.float32)
+
+            dfs[segment] = data
+            segment = segment + 1
+
+        df = pd.concat([df.assign(segment=k) for k,df in dfs.items()])
+
+        return df
 
 
     def merge_data(self, imu, tab):
@@ -78,8 +158,8 @@ class Dataset:
 
         t_left, t_right = tab["host_timestamp"].iloc[[0, -1]]
         i_left, i_right = imu["host_timestamp"].iloc[[0, -1]]
-        left = max(t_left, i_left)
-        right = min(t_right, i_right)
+        left = max(t_left, i_left) #later start
+        right = min(t_right, i_right) #earlier ending
 
         # use imu data set as base to merge on
         df = imu[(imu["host_timestamp"] >= left) & (imu["host_timestamp"] <= right)].copy() 
@@ -203,3 +283,7 @@ def split_into_segments(df: pd.DataFrame):
         data_segments["segment_"+str(i)] = df.iloc[split_indices[i]:split_indices[i+1]]
     return data_segments
 
+def get_ith_segment(df: pd.DataFrame, i:int):
+    data_segments = split_into_segments(df) # dictonary of segments
+    segment = data_segments["segment_"+str(i)]
+    return segment
