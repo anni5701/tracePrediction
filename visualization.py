@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import accuracy_score
 from data_processing import get_ith_segment
+import numpy as np
 
 
 def plot_accuracy(history):
@@ -70,6 +71,41 @@ def plot_data_set(df):
     axes[6].set_ylabel('vel z')
 
     axes[7].plot(df['pos_x'], df['pos_y'], c="k")
+    axes[7].set_ylabel('integrated positions')
+
+    fig.align_ylabels()
+    fig.tight_layout()
+
+    plt.show()
+
+def plot_ith_segment(df, i:int=0):
+    fig, axes = plt.subplots(8, figsize=(8, 16))
+    segment = df[df["segment"] == i]
+    
+    axes[0].plot(segment["x"], segment["y"], c="k")
+    axes[0].set_ylabel('tablet data')
+
+    axes[1].plot(segment['t_r'], segment['ax'], c="k", label= "sensor frame")
+    axes[1].plot(segment['t_r'], segment['nav_ax'], c="r", label= "nav frame")
+    axes[1].set_ylabel('ax  [m/s^2]')
+    axes[1].legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    axes[2].plot(segment['t_r'], segment['ay'], c="k", label= "sensor frame")
+    axes[2].plot(segment['t_r'], segment['nav_ay'], c="r", label= "nav frame")
+    axes[2].set_ylabel('ay  [m/s^2]')
+    axes[2].legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    axes[3].plot(segment['t_r'], segment['az'], c="k", label= "sensor frame")
+    axes[3].plot(segment['t_r'], segment['nav_az'], c="r", label= "nav frame")
+    axes[3].set_ylabel('az  [m/s^2]')
+    axes[3].legend(loc='center left', bbox_to_anchor=(1, 0.5))
+
+    axes[4].plot(segment['t_r'], segment['vel_x'], c="k")
+    axes[4].set_ylabel('vel x')
+    axes[5].plot(segment['t_r'], segment['vel_y'], c="k")
+    axes[5].set_ylabel('vel y')  
+    axes[6].plot(segment['t_r'], segment['vel_z'], c="k")
+    axes[6].set_ylabel('vel z')
+
+    axes[7].plot(segment['pos_x'], segment['pos_y'], c="k")
     axes[7].set_ylabel('integrated positions')
 
     fig.align_ylabels()
@@ -210,3 +246,15 @@ def test_predcition_comparison_x(y_test, predictions):
     plt.plot(t, x_pred, c='red', label='predicted values')
     plt.legend()
     plt.show()
+
+
+def test(y_test, predictions):
+    pos_values = np.array([y_test[0,0], y_test[0,1]]) # choose y_test start points
+    for i in range(1, len(predictions)-1):
+        np.vstack(pos_values, np.array([pos_values[i-1,0], pos_values[i-1,1]]))
+
+    plt.plot(y_test[:,0], y_test[:,1], c='blue', label='true values')
+    plt.plot(pos_values[:,0], pos_values[:,1], c='red', label='predicted values')
+    plt.legend()
+    plt.show()
+    

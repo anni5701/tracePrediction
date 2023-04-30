@@ -14,13 +14,15 @@ import itertools
 # removed comma from split indices
 # introduce empty list of split indices before assigning value with where so that I can also use it on df without segments
 
-
+#change masking for different approaches
+#fix slicing for short batch approach
+# plot segment prediction
 
 class PredictionModelTrace():
 
     BATCH_SIZE = 200 
-    INPUT_DIM = 16
-    OUTPUT_DIM = 1 # check for x first
+    INPUT_DIM = 13
+    OUTPUT_DIM = 2 # check for x first
     RNN_HIDDEN_DIM = 128
 
     PAD_VALUE = 999
@@ -29,19 +31,22 @@ class PredictionModelTrace():
 
     LENGTH_SEGMENT = None
 
+    feature_columns = ["ax", "ay", "az", "vel_x", "vel_y", "vel_z", "gx", "gy", "gz", "q0", "q1", "q2", "q3"]
+    label_columns = ["dx", "dy"]
+
     def __init__(self, dataframe):
 
         self.num_segments = dataframe["segment"].iloc[-1]
+        self.segment_starts = dataframe[dataframe["segment"].diff() != 0].index.tolist()
 
         x_train, y_train, x_test, y_test = self.prepare_data_with_segments(dataframe)
-        #x_train_mask = tf.not_equal(x_train, 0)
-        #x_test_mask = tf.not_equal(x_test, 0)
+
+        self.x_test = x_test
+        self.y_test = y_test
   
        # model = self.create_lstm1(x_train.shape[1], x_train.shape[2]) 
-     
 
         print("The trainings data is of shape {} and {} and the test data is of shape {} and {}". format(x_train.shape, y_train.shape, x_test.shape, y_test.shape))
-
         print ('Fitting model...')
 
         model = self.get_model_deep(x_train.shape[1], self.INPUT_DIM)
@@ -51,7 +56,7 @@ class PredictionModelTrace():
             print(f'\thas input mask: {l.input_mask}')
             print(f'\thas output mask: {l.output_mask}')
 
-        model.compile(optimizer=tf.keras.optimizers.Nadam(lr=0.001), loss='mae')
+        model.compile(optimizer=tf.keras.optimizers.Nadam(lr=0.001), loss='mse')
         print(model.summary())
         
 
@@ -65,11 +70,12 @@ class PredictionModelTrace():
         plt.legend(['train', 'test'], loc='upper left')
         plt.show()
 
-        print ('Use  model on test data...')
-        y_pred = model.predict(x_test, batch_size=self.BATCH_SIZE)
+        self.model = model
 
-        print(y_pred.shape)
-        print(y_pred[:10])
+        
+
+        
+
 
         #plt.plot(range(self.LENGTH_SEGMENT), y_pred[0,:,:], c="red", label="predictions")
         #plt.plot(range(self.LENGTH_SEGMENT), y_test[0,:,:], c="blue", label="true values")
@@ -90,15 +96,30 @@ class PredictionModelTrace():
         #predictions = self.predictions_test_data(model, x_test, y_test)
         #test_predcition_comparison(y_test, predictions)
         #test_predcition_comparison_x(y_test, predictions)
+    
+    def prepare_data_with_segments(self,df, test_split = 0.2,):
+        print ('Split into test and trainings data...')
 
+        #scale features 
+        scaler = StandardScaler() 
+        df[self.feature_columns] = pd.DataFrame(scaler.fit_transform(df[self.feature_columns].values), index=df.index)
 
-        
+        #split into training and test data
+        split = int(self.num_segments * (1- test_split))
+        train_data = df[df["segment"] <= split]
+        test_data =  df[df["segment"] > split]
 
-    def predictions_test_data(self, model, x_test, y_test):
-        print ('Use  model on test data...')
-        predictions = model.predict(x_test)
-        return predictions
-    # warum hier nicht mean für die verschiedenen timestemps
+        x_train, y_train = self.create_segments_and_labels(train_data, 10, 5)
+        x_test, y_test = self.create_segments_and_labels(test_data, 10 ,5)  #, y=False
+
+        x_train = x_train.astype('float32')
+        y_train = y_train.astype('float32')
+        x_test = x_test.astype('float32')
+        y_test = y_test.astype('float32')
+
+        return x_train, y_train, x_test, y_test
+
+    # approach to create batches on whole sentences
 
     def extract_segments_and_labels(self, dataframe: pd.DataFrame, y:bool= True):
         print ('Extract segments and labels...')
@@ -109,12 +130,13 @@ class PredictionModelTrace():
             self.LENGTH_SEGMENT = np.max(dataframe.groupby("segment").size())
 
         for i in range(self.num_segments):
-            d_i = dataframe[dataframe["segment"] == i].iloc[:,1:] # do not use t column as feature
-            d_i = d_i.drop("segment", axis=1)
-            d_i = d_i.drop("r", axis=1)
+            d_i = dataframe[dataframe["segment"] == i]#.iloc[:,1:] # do not use t column as feature
+            #d_i = d_i.drop("segment", axis=1)
+            #d_i = d_i.drop("r", axis=1)
             #ax,ay,az, gx,gy,gz, q0,q1,q2,q3,r,nav_ax,nav_ay,nav_az,vel_x,vel_y,vel_z,pos_x,pos_y,pos_z
-            features = d_i.iloc[:,3:].to_numpy().flatten().tolist()
-            positions = d_i.iloc[:,:1].to_numpy().flatten().tolist() #xyz #HIER geändert zu nur x erstmal
+            #features = d_i.iloc[:,3:].to_numpy().flatten().tolist()
+            features = d_i[d_i.columns.intersection(self.feature_columns)].to_numpy().flatten().tolist()
+            positions = d_i[d_i.columns.intersection(self.label_columns)].to_numpy().flatten().tolist() 
 
             segments.append(features)
             labels.append(positions)
@@ -122,12 +144,10 @@ class PredictionModelTrace():
         segments = tf.keras.preprocessing.sequence.pad_sequences(segments, padding="post", value=self.PAD_VALUE, maxlen= self.LENGTH_SEGMENT * self.INPUT_DIM)
         reshaped_segments = np.asarray(segments, dtype= np.float32).reshape(self.num_segments,-1, self.INPUT_DIM)
 
-        print(reshaped_segments[0,-100:0,:])
-
-        if y:
+        if y: 
             labels = tf.keras.preprocessing.sequence.pad_sequences(labels, padding="post", value=self.PAD_VALUE, maxlen= self.LENGTH_SEGMENT * self.OUTPUT_DIM)
             reshaped_labels = np.asarray(labels, dtype= np.float32).reshape(self.num_segments,-1, self.OUTPUT_DIM)
-        else:
+        else: # do not pad test values
             labels = list(itertools.chain(*labels))
             reshaped_labels = np.asarray(labels, dtype= np.float32)
 
@@ -135,32 +155,31 @@ class PredictionModelTrace():
         #print(reshaped_labels[:1,:10,:])
 
         return reshaped_segments, reshaped_labels
-
-
     
-    def prepare_data_with_segments(self,df, test_split = 0.2,):
-        print ('Split into test and trainings data...')
 
-        #scale features 
-        features = ['ax', 'ay', 'az', 'gx', 'gy','gz','q0', 'q1', 'q2', 'q3', 'nav_ax', 'nav_ay', 'nav_az','vel_x', 'vel_y', 'vel_z']
-        scaler = StandardScaler() 
-        df[features] = pd.DataFrame(scaler.fit_transform(df[features].values), index=df.index)
+    # approach to create batches based on smaller timestemps
 
-        #split into training and test data
-        split = int(self.num_segments * (1- test_split))
-        train_data = df[df["segment"] <= split]
-        test_data =  df[df["segment"] > split]
+    def create_segments_and_labels(self, dataframe: pd.DataFrame, steps, offset):
+        segments = []
+        labels = []
 
-        x_train, y_train = self.extract_segments_and_labels(train_data)
-        x_test, y_test = self.extract_segments_and_labels(test_data)  #, y=False
+        num_batches = int(dataframe.shape[0] / (steps * (self.INPUT_DIM)))
+        i = 0
+        for b in range(num_batches):
+            segments.append(dataframe.iloc[i: i+steps, :-2].to_numpy().flatten().tolist())
+            labels.append(dataframe.iloc[i:i+steps, -2:].to_numpy().flatten().tolist())
+            i = i + offset
+        x_train, y_train = np.array(segments).reshape(-1,steps, self.INPUT_DIM), np.array(labels).reshape(-1,steps, self.OUTPUT_DIM)
+        print("reshaped labels shape: ",y_train.shape, "reshaped segments shape: ", x_train.shape)
 
-        x_train = x_train.astype('float32')
-        y_train = y_train.astype('float32')
-        x_test = x_test.astype('float32')
-        y_test = y_test.astype('float32')
+        return x_train, y_train
+    
 
-        return x_train, y_train, x_test, y_test
-
+    def predictions_test_data(self, model, x_test):
+        print ('Use  model on test data...')
+        predictions = model.predict(x_test)
+        return predictions
+    # warum hier nicht mean für die verschiedenen timestemps
 
 
     def create_lstm1(self,n_timesteps, n_features):
@@ -173,13 +192,10 @@ class PredictionModelTrace():
         print(model.summary())
         return model
 
-
-    
-
     def get_model_deep(self, max_seg_length, num_features=INPUT_DIM):
         inp = tf.keras.layers.Input((max_seg_length,num_features))
-        x = tf.keras.layers.Masking(mask_value=self.PAD_VALUE)(inp)
-        x = tf.keras.layers.LSTM(128, return_sequences=True)(x)
+        #x = tf.keras.layers.Masking(mask_value=self.PAD_VALUE)(inp)
+        x = tf.keras.layers.LSTM(128, return_sequences=True)(inp)
         #x = tf.keras.layers.BatchNormalization()(x)
         x = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(64))(x) #TimeDistributed(
         #x = tf.keras.layers.BatchNormalization()(x)

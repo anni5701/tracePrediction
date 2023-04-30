@@ -16,7 +16,7 @@ class Dataset:
     # use Madgwick filter to compute quaternion representation
     madgwick = ahrs.filters.Madgwick()
 
-    def __init__(self, imu_location:str, tab_location:str, segments: bool=False):
+    def __init__(self, imu_location:str, tab_location:str):
         """
         Input: 
             imu: csv file name with imu data in form of [host_timestamp, arduino_timestamp, ax, ay, az, gx, gy, gz, temperature]
@@ -29,25 +29,21 @@ class Dataset:
         imu = pd.read_csv(self.PATH_TO_DATA + imu_location, encoding="utf-8")
         tab = pd.read_csv(self.PATH_TO_DATA + tab_location, encoding="utf-16")
 
-        self.data_set = self.load_data(imu,tab, segments)
+        smoothness = 200.0
+        step = 0.5
+
+        self.data_set = self.load_data(imu,tab,smoothness,step)
         
 
-    def load_data(self, imu: pd.DataFrame, tab:pd.DataFrame, segments:bool= False):
-        print(type(imu))
+    def load_data(self, imu: pd.DataFrame, tab:pd.DataFrame, smoothness, step):
         imu[['gx', 'gy', 'gz']] = imu[['gx', 'gy', 'gz']] + self.GYRO_OFFSET
         imu[['ax', 'ay', 'az']] = imu[['ax', 'ay', 'az']] * self.ACC_SCALE  + self.ACC_OFFSET
 
-        df = self.merge_data(imu,tab)
+        df = self.merge_data_based_on_tab(tab,imu, smoothness,step)
         #df = self.adjust_timestamps(df)
-        if segments:
-            d = self.split_into_segments(df)
-            for segment in d.keys():
-                print("processing {}".format(segment))
-                d[segment] = self.process_dataframe(d[segment])
-            return d
-        else:
-            df = self.process_dataframe(df)
-            return df
+             
+        df = self.process_dataframe(df)
+        return df
         
         
 
@@ -62,10 +58,32 @@ class Dataset:
         vel_x, vel_y,vel_z,pos_x, pos_y, pos_z = self.integrate(df)
         integrated_data = np.stack((vel_x, vel_y, vel_z, pos_x, pos_y, pos_z), axis=1)
         df = pd.concat([df.reset_index(drop=True), pd.DataFrame(integrated_data, columns=['vel_x','vel_y','vel_z', 'pos_x', 'pos_y', 'pos_z'])], axis=1)
+        df = self.add_xy_delta_values(df)
+        return df
+    
+
+    def add_xy_delta_values(self, df:pd.DataFrame):
+        df['dx'] = df['x'] - df['x'].shift(1)
+        df['dy'] = df['y'] - df['y'].shift(1)
+        # introduces NaN values in the beginning
+        df['dx'] = df['dx'].fillna(0)
+        df['dy'] = df['dy'].fillna(0)
+
         return df
     
     #after merge
     def merge_data_based_on_tab(self, tab, imu, smoothness, step):
+        """
+        Input: 
+            imu: pd.DataFrame with columns [host_timestamp, arduino_timestamp, ax, ay, az, gx, gy, gz, temperature]
+            tab: pd.DataFrame with columns [host_timestamp, x, y, z, in_range, touch, pressure, reset]
+
+        Output: 
+            pd.DataFrame containing imu and tab data 
+        """
+
+        print("merging the data sets...")
+
         t_left, t_right = tab["host_timestamp"].iloc[[0, -1]]
         i_left, i_right = imu["host_timestamp"].iloc[[0, -1]]
         left = max(t_left, i_left) #later start
@@ -98,10 +116,10 @@ class Dataset:
             start, end = df.index[mask][[0, -1]] # mask hat für die gesamte colum true/false werte und start/end sind erste letzte true werte
             df = df.loc[start:end]
 
-            imu_start = imu.loc[(imu['host_timestamp']-df["host_timestamp"].loc[start]).abs().argsort()[:1]].index
-            imu_end = imu.loc[(imu['host_timestamp']-df["host_timestamp"].loc[end]).abs().argsort()[:1]].index
+            imu_start = imu.loc[(imu['host_timestamp']-df["host_timestamp"].loc[start]).abs().argsort()[:1]].index[0]
+            imu_end = imu.loc[(imu['host_timestamp']-df["host_timestamp"].loc[end]).abs().argsort()[:1]].index[0]
 
-            imu_df = imu.loc[imu_start, imu_end]
+            imu_df = imu.iloc[imu_start:imu_end]
 
             # Compute distance
             x = df["x"].values
@@ -122,8 +140,14 @@ class Dataset:
             data["t_r"] = np.arange(0, length, step)
             x_r, y_r = scipy.interpolate.splev(data["t_r"], tck, der=0)
 
-            data["x_r"] = x_r
-            data["y_r"] = y_r
+            data["x"] = x_r
+            data["y"] = y_r
+
+            #interpolate z values
+            t_tab = df["host_timestamp"] - np.min(df["host_timestamp"])
+            tab_time_span = np.linspace(0, np.max(t_tab), len(data))
+
+            data["z"] = np.interp(tab_time_span, t_tab, df["z"])
 
             t_imu = imu_df["host_timestamp"] - np.min(imu_df["host_timestamp"])
             imu_time_span = np.linspace(0, np.max(t_imu), len(data))
@@ -144,50 +168,10 @@ class Dataset:
         return df
 
 
-    def merge_data(self, imu, tab):
-        """
-        Input: 
-            imu: pd.DataFrame with columns [host_timestamp, arduino_timestamp, ax, ay, az, gx, gy, gz, temperature]
-            tab: pd.DataFrame with columns [host_timestamp, x, y, z, in_range, touch, pressure, reset]
-
-        Output: 
-            pd.DataFrame containing imu and tab data with interpolated values for the tab data
-        """
-
-        print("merging the data sets...")
-
-        t_left, t_right = tab["host_timestamp"].iloc[[0, -1]]
-        i_left, i_right = imu["host_timestamp"].iloc[[0, -1]]
-        left = max(t_left, i_left) #later start
-        right = min(t_right, i_right) #earlier ending
-
-        # use imu data set as base to merge on
-        df = imu[(imu["host_timestamp"] >= left) & (imu["host_timestamp"] <= right)].copy() 
-
-        for column in ["x", "y", "z", "in_range", "touch", "pressure"]:
-            df[column] = np.interp(df["host_timestamp"], tab["host_timestamp"], tab[column])
-
-        # For reset, assign to closest timestamp
-        mask = tab["reset"] != 0
-        indices = np.searchsorted(df["host_timestamp"], tab.loc[mask, "host_timestamp"])
-        df["reset"] = 0
-        df.loc[df.index[indices], "reset"] = tab.loc[mask, "reset"].values
-
-        return df
-
-
-
-    def adjust_timestamps(self, df: pd.DataFrame):
-        print("adjust the timestamps...")
-
-        df['arduino_timestamp'] = df['arduino_timestamp'].apply(lambda x: (x - min(df['arduino_timestamp'])) /1000)
-        return df
-
-
     def quaternions(self, df: pd.DataFrame): # input dataframe/single segment
         print("calculate the quaternion representations...")
 
-        T = df["arduino_timestamp"].values
+        T = df["t_r"].values
         A = df[["ax", "ay", "az"]].values
         G = df[["gx", "gy", "gz"]].values
         Q = np.zeros((len(T), 4))
@@ -260,7 +244,7 @@ class Dataset:
         return x
 
     def integrate(self, df):
-        T = df["arduino_timestamp"].values
+        T = df["t_r"].values
         vel_x = self.integrate_1d(T,df['nav_ax'])
         vel_y = self.integrate_1d(T,df['nav_ay'])
         vel_z = self.integrate_1d(T,df['nav_az'])
