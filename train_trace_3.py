@@ -22,8 +22,10 @@ class PredictionModelTrace():
 
     BATCH_SIZE = 200 
     INPUT_DIM = 13
-    OUTPUT_DIM = 2 # check for x first
+    OUTPUT_DIM = 2 
     RNN_HIDDEN_DIM = 128
+
+    TIME_STEMPS = 10
 
     PAD_VALUE = 999
 
@@ -49,7 +51,7 @@ class PredictionModelTrace():
         print("The trainings data is of shape {} and {} and the test data is of shape {} and {}". format(x_train.shape, y_train.shape, x_test.shape, y_test.shape))
         print ('Fitting model...')
 
-        model = self.get_model_deep(x_train.shape[1], self.INPUT_DIM)
+        model = self.get_model_deep_time_stemps(x_train.shape[1], self.INPUT_DIM)
 
         for i, l in enumerate(model.layers):
             print(f'layer {i}: {l}')
@@ -109,8 +111,8 @@ class PredictionModelTrace():
         train_data = df[df["segment"] <= split]
         test_data =  df[df["segment"] > split]
 
-        x_train, y_train = self.create_segments_and_labels(train_data, 10, 5)
-        x_test, y_test = self.create_segments_and_labels(test_data, 10 ,5)  #, y=False
+        x_train, y_train = self.create_segments_and_labels(train_data, self.TIME_STEMPS, 5)
+        x_test, y_test = self.create_segments_and_labels(test_data, self.TIME_STEMPS ,5)  #, y=False
 
         x_train = x_train.astype('float32')
         y_train = y_train.astype('float32')
@@ -160,6 +162,9 @@ class PredictionModelTrace():
     # approach to create batches based on smaller timestemps
 
     def create_segments_and_labels(self, dataframe: pd.DataFrame, steps, offset):
+
+        dataframe = dataframe[dataframe.columns.intersection(self.feature_columns + self.label_columns)]
+        print(dataframe.columns)
         segments = []
         labels = []
 
@@ -169,10 +174,13 @@ class PredictionModelTrace():
             segments.append(dataframe.iloc[i: i+steps, :-2].to_numpy().flatten().tolist())
             labels.append(dataframe.iloc[i:i+steps, -2:].to_numpy().flatten().tolist())
             i = i + offset
-        x_train, y_train = np.array(segments).reshape(-1,steps, self.INPUT_DIM), np.array(labels).reshape(-1,steps, self.OUTPUT_DIM)
-        print("reshaped labels shape: ",y_train.shape, "reshaped segments shape: ", x_train.shape)
+        x, y = np.array(segments).reshape(-1,steps, self.INPUT_DIM), np.array(labels).reshape(-1,steps, self.OUTPUT_DIM)
+        
+        print("reshaped labels shape: ",y.shape, "reshaped segments shape: ", x.shape)
 
-        return x_train, y_train
+        return x, y
+    
+
     
 
     def predictions_test_data(self, model, x_test):
@@ -194,7 +202,7 @@ class PredictionModelTrace():
 
     def get_model_deep(self, max_seg_length, num_features=INPUT_DIM):
         inp = tf.keras.layers.Input((max_seg_length,num_features))
-        #x = tf.keras.layers.Masking(mask_value=self.PAD_VALUE)(inp)
+        x = tf.keras.layers.Masking(mask_value=self.PAD_VALUE)(inp)
         x = tf.keras.layers.LSTM(128, return_sequences=True)(inp)
         #x = tf.keras.layers.BatchNormalization()(x)
         x = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(64))(x) #TimeDistributed(
@@ -207,4 +215,18 @@ class PredictionModelTrace():
         tf.keras.Model()
         return model
     
+    def get_model_deep_time_stemps(self, time_stemps, num_features=INPUT_DIM):
+        inp = tf.keras.layers.Input((time_stemps,num_features))
+        #x = tf.keras.layers.Masking(mask_value=self.PAD_VALUE)(inp)
+        x = tf.keras.layers.LSTM(128, return_sequences=True)(inp)
+        #x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(64))(x) #TimeDistributed(
+        #x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.LSTM(128, return_sequences=True)(x)
+        #x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(self.OUTPUT_DIM))(x)
+
+        model = tf.keras.Model(inp, x)
+        tf.keras.Model()
+        return model
 

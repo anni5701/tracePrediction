@@ -249,12 +249,33 @@ def test_predcition_comparison_x(y_test, predictions):
 
 
 def test(y_test, predictions):
-    pos_values = np.array([y_test[0,0], y_test[0,1]]) # choose y_test start points
+    y_test = y_test.reshape(-1,2)
+    predictions = predictions.reshape(-1,2)
+    pos_values = np.array([y_test[0,0], y_test[0,1]]).reshape(1,2) # choose y_test start points
+    print(pos_values.shape)
+    print(predictions.shape) #(310, 10, 2)
+    print(y_test.shape)
     for i in range(1, len(predictions)-1):
-        np.vstack(pos_values, np.array([pos_values[i-1,0], pos_values[i-1,1]]))
+        next_time_stemp =  np.array([predictions[i,0], predictions[i,1]]).reshape(1,2)
+        next_time_stemp = next_time_stemp + pos_values[i-1,:]
+        pos_values = np.vstack((pos_values, next_time_stemp))
 
     plt.plot(y_test[:,0], y_test[:,1], c='blue', label='true values')
     plt.plot(pos_values[:,0], pos_values[:,1], c='red', label='predicted values')
     plt.legend()
     plt.show()
+
+
+def print_segment_with_delta_values(start_x, start_y, dx, dy, true_x= [], true_y= []):
+    x_values = [start_x]
+    y_values = [start_y]
+    for i in range(len(dx)):
+        x_values.append(x_values[i] + dx[i])
+        y_values.append(y_values[i] + dy[i])
+    plt.plot(x_values, y_values)
+    if true_x != [] and true_y != []:
+        plt.plot(true_x, true_y, c="red")
+    plt.show()
+
+        
     
