@@ -272,9 +272,10 @@ def print_segment_with_delta_values(start_x, start_y, dx, dy, true_x= [], true_y
     for i in range(len(dx)):
         x_values.append(x_values[i] + dx[i])
         y_values.append(y_values[i] + dy[i])
-    plt.plot(x_values, y_values)
+    plt.plot(x_values, y_values, label= "delta values")
     if true_x != [] and true_y != []:
-        plt.plot(true_x, true_y, c="red")
+        plt.plot(true_x, true_y, c="red", label="true values")
+    plt.legend()
     plt.show()
 
         
